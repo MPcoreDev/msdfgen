@@ -289,6 +289,8 @@ static const char *helpText =
         "\tSets the scale used to convert shape units to pixels asymmetrically.\n"
     "  -autoframe\n"
         "\tAutomatically scales (unless specified) and translates the shape to fit.\n"
+    "  -gentexture <maxsize>\n"
+        "\tAutomatically scales and translates the shape to fit in a given max size.\n"
     "  -coloringstrategy <simple / inktrap>\n"
         "\tSelects the strategy of the edge coloring heuristic.\n"
     "  -edgecolors <sequence>\n"
@@ -378,6 +380,8 @@ int main(int argc, const char * const *argv) {
     int testWidth = 0, testHeight = 0;
     int testWidthM = 0, testHeightM = 0;
     bool autoFrame = false;
+    bool gentexture = false;
+    int maxsize = 32;
     enum {
         RANGE_UNIT,
         RANGE_PX
@@ -515,6 +519,15 @@ int main(int argc, const char * const *argv) {
         ARG_CASE("-autoframe", 0) {
             autoFrame = true;
             argPos += 1;
+            continue;
+        }
+        ARG_CASE("-gentexture", 1) {
+            unsigned i;
+            if (!parseUnsigned(i, argv[argPos+1]) || !i)
+                ABORT("Invalid maxsize argument. Use -gentexture <maxsize> with one positive integer.");
+            gentexture = true;
+            maxsize = i;
+            argPos += 2;
             continue;
         }
         ARG_CASE("-range", 1) {
@@ -732,7 +745,7 @@ int main(int argc, const char * const *argv) {
 
     double avgScale = .5*(scale.x+scale.y);
     Shape::Bounds bounds = { };
-    if (autoFrame || mode == METRICS || printMetrics || orientation == GUESS)
+    if (autoFrame || mode == METRICS || printMetrics || orientation == GUESS || gentexture)
         bounds = shape.getBounds();
 
     // Auto-frame
@@ -763,6 +776,29 @@ int main(int argc, const char * const *argv) {
             translate += .5*pxRange/scale;
     }
 
+    // Generation for a texture
+    if (gentexture) {
+        double l = bounds.l, b = bounds.b, r = bounds.r, t = bounds.t;
+        double xRange = r - l;
+        double yRange = t - b;
+        //double maxrange = max(xRange, yRange);
+        if (rangeMode == RANGE_UNIT) {
+            xRange += range;
+            yRange += range;
+            //scale = (double)maxsize / maxrange;
+            scale = (double)maxsize / yRange;
+            translate.set(-l + range/2., -b + range/2.);
+            height = maxsize;
+            width = xRange * scale.y;
+        } else {
+            scale = ((double)maxsize-pxRange) / yRange;
+            translate.set(-l + pxRange/2. / scale.x, -b + pxRange/2. / scale.y);
+            height = maxsize;
+            width = xRange * scale.y + pxRange;
+        }
+        avgScale = scale.x;
+    }
+
     if (rangeMode == RANGE_PX)
         range = pxRange/min(scale.x, scale.y);
 
@@ -786,10 +822,21 @@ int main(int argc, const char * const *argv) {
                 fprintf(out, "scale = %.12g\n", avgScale);
             fprintf(out, "translate = %.12g, %.12g\n", translate.x, translate.y);
         }
+        if (gentexture) {
+            if (!scaleSpecified)
+                fprintf(out, "scale = %.12g\n", avgScale);
+            fprintf(out, "translate = %.12g, %.12g\n", translate.x, translate.y);
+            fprintf(out, "cursor = %.12g, %.12g\n", translate.x*avgScale, translate.y*avgScale);
+            fprintf(out, "size = %d, %d\n", width, height);
+        }
         if (rangeMode == RANGE_PX)
             fprintf(out, "range = %.12g\n", range);
         if (mode == METRICS && outputSpecified)
             fclose(out);
+    }
+
+    if (gentexture) {
+        fprintf(stdout, "%.12g %d %d %.12g %.12g %.12g\n", avgScale, width, height, translate.x*avgScale, translate.y*avgScale, glyphAdvance*avgScale);
     }
 
     // Compute output
